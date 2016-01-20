@@ -654,6 +654,7 @@ class RunReporting:
         # Return if no reporting modules are loaded.
         if reporting_list:
             reporting_list.sort(key=lambda module: module.order)
+            log.info(reporting_list)
 
             # Run every loaded reporting module.
             for module in reporting_list:

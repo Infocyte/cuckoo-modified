@@ -625,6 +625,7 @@ def procdump(request, object_id, task_id, process_id, start, end):
 def filereport(request, task_id, category):
     formats = {
         "json": "report.json",
+	"jsonsummary": "summary-report.json",
         "html": "report.html",
         "htmlsummary": "summary-report.html",
         "pdf": "report.pdf",
