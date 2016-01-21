@@ -227,7 +227,7 @@ def tasks_delete(task_id):
 @route("/v1/tasks/report/<task_id:int>", method="GET")
 @route("/tasks/report/<task_id:int>/<report_format>", method="GET")
 @route("/v1/tasks/report/<task_id:int>/<report_format>", method="GET")
-def tasks_report(task_id, report_format="json"):
+def tasks_report(task_id, report_format="jsonsummary"):
     formats = {
         "jsonsummary": "summary-report.json",
         "json": "report.json",
