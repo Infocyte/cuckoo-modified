@@ -523,10 +523,10 @@ class RunSignatures(object):
             for alert in self.results["suricata"]["alerts"]:
                 if "signature" in alert and alert["signature"]:
                     if alert["signature"].startswith("ET TROJAN") or alert["signature"].startswith("ETPRO TROJAN"):
-                        words = re.findall(r"[A-Za-z0-9\.]+", alert["signature"])
+                        words = re.findall(r"[A-Za-z0-9]+", alert["signature"])
                         famcheck = words[2]
                         famchecklower = famcheck.lower()
-                        if famchecklower == "win32":
+                        if famchecklower == "win32" or famchecklower == "w32":
                             famcheck = words[3]
                             famchecklower = famcheck.lower()
 
@@ -547,9 +547,13 @@ class RunSignatures(object):
                             "probably",
                             "w2km",
                             "http",
-                            "abuse",
+                            "abuse.ch",
                             "win32",
                             "unknown",
+                            "single",
+                            "exe",
+                            "filename",
+                            "js",
                         ]
                         isgood = True
                         for black in blacklist:
@@ -562,7 +566,8 @@ class RunSignatures(object):
 
         # fall back to ClamAV detection
         if not family and self.results["info"]["category"] == "file" and "clamav" in self.results["target"]["file"] and self.results["target"]["file"]["clamav"] and self.results["target"]["file"]["clamav"].startswith("Win.Trojan."):
-            family = self.results["target"]["file"]["clamav"][11:]
+            words = re.findall(r"[A-Za-z0-9]+", self.results["target"]["file"]["clamav"])
+            family = words[2]
 
         self.results["malfamily"] = family
 

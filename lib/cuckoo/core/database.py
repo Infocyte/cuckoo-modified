@@ -30,7 +30,7 @@ except ImportError:
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = "4b09c454108c"
+SCHEMA_VERSION = "f111620bb8"
 TASK_PENDING = "pending"
 TASK_RUNNING = "running"
 TASK_COMPLETED = "completed"
@@ -302,6 +302,13 @@ class Task(Base):
     guest = relationship("Guest", uselist=False, backref="tasks", cascade="save-update, delete")
     errors = relationship("Error", backref="tasks", cascade="save-update, delete")
 
+    shrike_url = Column(String(4096), nullable=True)
+    shrike_refer = Column(String(4096), nullable=True)
+    shrike_msg = Column(String(4096), nullable=True)
+    shrike_sid = Column(Integer(), nullable=True)
+
+    parent_id = Column(Integer(), nullable=True)
+
     def to_dict(self):
         """Converts object to dict.
         @return: dict
@@ -565,7 +572,7 @@ class Database(object):
         row = None
         try:
             if machine != "":
-                row = session.query(Task).filter_by(status=TASK_PENDING).filter(Machine.name==machine).order_by("priority desc, added_on").first()
+                row = session.query(Task).filter_by(status=TASK_PENDING).filter_by(machine=machine).order_by("priority desc, added_on").first()
             else:
                 row = session.query(Task).filter_by(status=TASK_PENDING).order_by("priority desc, added_on").first()
 
@@ -671,10 +678,12 @@ class Database(object):
         if label and platform:
             # Wrong usage.
             log.error("You can select machine only by label or by platform.")
+            session.close()
             return None
         elif label and tags:
             # Also wrong usage.
             log.error("You can select machine only by label or by tags.")
+            session.close()
             return None
 
         try:
@@ -690,6 +699,7 @@ class Database(object):
             # Check if there are any machines that satisfy the
             # selection requirements.
             if not machines.count():
+                session.close()
                 raise CuckooOperationalError("No machines match selection criteria.")
 
             # Get the first free machine.
@@ -711,6 +721,8 @@ class Database(object):
                 return None
             finally:
                 session.close()
+        else:
+            session.close()
 
         return machine
 
@@ -740,6 +752,8 @@ class Database(object):
                 return None
             finally:
                 session.close()
+        else:
+            session.close()
 
         return machine
 
@@ -823,7 +837,9 @@ class Database(object):
     @classlock
     def add(self, obj, timeout=0, package="", options="", priority=1,
             custom="", machine="", platform="", tags=None,
-            memory=False, enforce_timeout=False, clock=None):
+            memory=False, enforce_timeout=False, clock=None,
+            shrike_url=None, shrike_msg=None, 
+            shrike_sid = None, shrike_refer=None, parent_id=None):
         """Add a task to database.
         @param obj: object to add (File or URL).
         @param timeout: selected timeout.
@@ -896,7 +912,11 @@ class Database(object):
         task.platform = platform
         task.memory = memory
         task.enforce_timeout = enforce_timeout
-
+        task.shrike_url = shrike_url
+        task.shrike_msg = shrike_msg
+        task.shrike_sid = shrike_sid
+        task.shrike_refer = shrike_refer
+        task.parent_id = parent_id
         # Deal with tags format (i.e., foo,bar,baz)
         if tags:
             for tag in tags.replace(" ", "").split(","):
@@ -936,7 +956,8 @@ class Database(object):
 
     def add_path(self, file_path, timeout=0, package="", options="",
                  priority=1, custom="", machine="", platform="", tags=None,
-                 memory=False, enforce_timeout=False, clock=None):
+                 memory=False, enforce_timeout=False, clock=None, shrike_url=None, 
+                 shrike_msg=None, shrike_sid = None, shrike_refer=None, parent_id=None):
         """Add a task to database from file path.
         @param file_path: sample path.
         @param timeout: selected timeout.
@@ -963,11 +984,12 @@ class Database(object):
 
         return self.add(File(file_path), timeout, package, options, priority,
                         custom, machine, platform, tags, memory,
-                        enforce_timeout, clock)
+                        enforce_timeout, clock, shrike_url, shrike_msg, shrike_sid, shrike_refer, parent_id)
 
     def demux_sample_and_add_to_db(self, file_path, timeout=0, package="", options="", priority=1,
                                    custom="", machine="", platform="", tags=None,
-                                   memory=False, enforce_timeout=False, clock=None):
+                                   memory=False, enforce_timeout=False, clock=None,shrike_url=None,
+                                   shrike_msg=None, shrike_sid = None, shrike_refer=None, parent_id=None):
         """
         Handles ZIP file submissions, submitting each extracted file to the database
         Returns a list of added task IDs
@@ -988,7 +1010,12 @@ class Database(object):
                                     custom=custom,
                                     enforce_timeout=enforce_timeout,
                                     tags=tags,
-                                    clock=clock)
+                                    clock=clock,
+                                    shrike_url=shrike_url,
+                                    shrike_msg=shrike_msg,
+                                    shrike_sid=shrike_sid,
+                                    shrike_refer=shrike_refer,
+                                    parent_id=parent_id)
             if task_id:
                 task_ids.append(task_id)
 
@@ -997,7 +1024,8 @@ class Database(object):
     @classlock
     def add_url(self, url, timeout=0, package="", options="", priority=1,
                 custom="", machine="", platform="", tags=None, memory=False,
-                enforce_timeout=False, clock=None):
+                enforce_timeout=False, clock=None, shrike_url=None, shrike_msg=None, 
+                shrike_sid = None, shrike_refer=None, parent_id=None):
         """Add a task to database from url.
         @param url: url.
         @param timeout: selected timeout.
@@ -1021,7 +1049,8 @@ class Database(object):
 
         return self.add(URL(url), timeout, package, options, priority,
                         custom, machine, platform, tags, memory,
-                        enforce_timeout, clock)
+                        enforce_timeout, clock, shrike_url, shrike_msg,
+                        shrike_sid, shrike_refer, parent_id)
 
     @classlock
     def reschedule(self, task_id):
@@ -1060,7 +1089,34 @@ class Database(object):
         return add(task.target, task.timeout, task.package, task.options,
                    task.priority, task.custom, task.machine, task.platform,
                    tags, task.memory, task.enforce_timeout, task.clock)
+    @classlock
+    def count_matching_tasks(self, category=None,
+                   status=None, not_status=None):
+        """Retrieve list of task.
+        @param category: filter by category
+        @param status: filter by task status
+        @param not_status: exclude this task status from filter
+        @return: number of tasks.
+        """
+        session = self.Session()
+        try:
+            search = session.query(Task)
 
+            if status:
+                search = search.filter_by(status=status)
+            if not_status:
+                search = search.filter(Task.status != not_status)
+            if category:
+                search = search.filter_by(category=category)
+
+            tasks = search.count()
+            return tasks
+        except SQLAlchemyError as e:
+            log.debug("Database error counting tasks: {0}".format(e))
+            return []
+        finally:
+            session.close()
+            
     @classlock
     def list_tasks(self, limit=None, details=False, category=None,
                    offset=None, status=None, sample_id=None, not_status=None,

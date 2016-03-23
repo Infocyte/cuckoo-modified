@@ -13,7 +13,7 @@ from time import time
 from ctypes import byref, c_ulong, create_string_buffer, c_int, sizeof
 from shutil import copy
 
-from lib.common.constants import PIPE, PATHS, SHUTDOWN_MUTEX, TERMINATE_EVENT
+from lib.common.constants import PIPE, PATHS, SHUTDOWN_MUTEX, TERMINATE_EVENT, LOGSERVER_PREFIX
 from lib.common.constants import CUCKOOMON32_NAME, CUCKOOMON64_NAME, LOADER32_NAME, LOADER64_NAME
 from lib.common.defines import ULONG_PTR
 from lib.common.defines import KERNEL32, NTDLL, SYSTEM_INFO, STILL_ACTIVE
@@ -34,6 +34,10 @@ from lib.core.log import LogServer
 IOCTL_PID = 0x222008
 IOCTL_CUCKOO_PATH = 0x22200C
 PATH_KERNEL_DRIVER = "\\\\.\\DriverSSDT"
+
+LOGSERVER_POOL = dict()
+ATTEMPTED_APC_INJECTS = dict()
+ATTEMPTED_THREAD_INJECTS = dict()
 
 log = logging.getLogger(__name__)
 
@@ -76,8 +80,7 @@ class Process:
         self.h_thread = h_thread
         self.suspended = suspended
         self.system_info = SYSTEM_INFO()
-        self.logserver_path = "\\\\.\\PIPE\\" + random_string(8, 12)
-        self.logserver = None
+        self.critical = False
 
     def __del__(self):
         """Close open handles."""
@@ -149,7 +152,7 @@ class Process:
 
         NT_SUCCESS = lambda val: val >= 0
 
-        pbi = create_string_buffer(200)
+        pbi = create_string_buffer(530)
         size = c_int()
 
         # Set return value to signed 32bit integer.
@@ -177,12 +180,18 @@ class Process:
         """
         return self.exit_code() == STILL_ACTIVE
 
+    def set_critical(self):
+        self.critical = True
+
     def is_critical(self):
         """Determines if process is 'critical' or not, so we can prevent
            terminating it
         """
         if not self.h_process:
             self.open()
+
+        if self.critical:
+            return True
 
         NT_SUCCESS = lambda val: val >= 0
 
@@ -495,14 +504,30 @@ class Process:
 
         return True
 
+    def check_inject(self):
+        if not self.pid:
+            return False
+
+        if self.thread_id or self.suspended:
+            if (self.pid,self.thread_id) in ATTEMPTED_APC_INJECTS:
+                return False
+            ATTEMPTED_APC_INJECTS[(self.pid,self.thread_id)] = True
+        else:
+            if self.pid in ATTEMPTED_THREAD_INJECTS:
+                return False
+            ATTEMPTED_THREAD_INJECTS[self.pid] = True
+
+        return True
+
     def inject(self, dll=None, interest=None, nosleepskip=False):
         """Cuckoo DLL injection.
         @param dll: Cuckoo DLL path.
         @param interest: path to file of interest, handed to cuckoomon config
         @param apc: APC use.
         """
+        global LOGSERVER_POOL
+
         if not self.pid:
-            log.warning("No valid pid specified, injection aborted")
             return False
 
         thread_id = 0
@@ -530,20 +555,27 @@ class Process:
                         "with pid %d, injection aborted.", self.pid)
             return False
 
+        if thread_id or self.suspended:
+            log.debug("Using QueueUserAPC injection.")
+        else:
+            log.debug("Using CreateRemoteThread injection.")
+
         config_path = "C:\\%s.ini" % self.pid
         with open(config_path, "w") as config:
             cfg = Config("analysis.conf")
             cfgoptions = cfg.get_options()
 
             # start the logserver for this monitored process
-            self.logserver = LogServer(cfg.ip, cfg.port, self.logserver_path)
+            logserver_path = LOGSERVER_PREFIX + str(self.pid)
+            if logserver_path not in LOGSERVER_POOL:
+                LOGSERVER_POOL[logserver_path] = LogServer(cfg.ip, cfg.port, logserver_path)
 
             firstproc = Process.first_process
 
             config.write("host-ip={0}\n".format(cfg.ip))
             config.write("host-port={0}\n".format(cfg.port))
             config.write("pipe={0}\n".format(PIPE))
-            config.write("logserver={0}\n".format(self.logserver_path))
+            config.write("logserver={0}\n".format(logserver_path))
             config.write("results={0}\n".format(PATHS["root"]))
             config.write("analyzer={0}\n".format(os.getcwd()))
             config.write("first-process={0}\n".format("1" if firstproc else "0"))
@@ -570,7 +602,10 @@ class Process:
                 "sys32_ctimelow",
                 "sys32_ctimehigh",
                 "debug",
-                "disable_hook_content"
+                "disable_hook_content",
+                "hook-type",
+                "exclude-apis",
+                "exclude-dlls",
                 ]
             
             for optname in simple_optnames:
@@ -579,11 +614,6 @@ class Process:
 
             if firstproc:
                 Process.first_process = False
-
-        if thread_id or self.suspended:
-            log.debug("Using QueueUserAPC injection.")
-        else:
-            log.debug("Using CreateRemoteThread injection.")
 
         orig_bin_name = ""
         bit_str = ""

@@ -7,8 +7,13 @@ import hashlib
 import logging
 import os
 import subprocess
+import mmap
+import struct
+import copy
 
 from lib.cuckoo.common.constants import CUCKOO_ROOT
+from lib.cuckoo.common.defines import PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE, PAGE_WRITECOPY, PAGE_EXECUTE, PAGE_EXECUTE_READ
+from lib.cuckoo.common.defines import PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_WRITECOPY, PAGE_GUARD, PAGE_NOCACHE, PAGE_WRITECOMBINE
 
 try:
     import magic
@@ -33,7 +38,12 @@ try:
     HAVE_CLAMAV = True
 except ImportError:
     HAVE_CLAMAV = False
-    
+
+try:
+    import re2 as re
+except ImportError:
+    import re
+
 log = logging.getLogger(__name__)
 
 FILE_CHUNK_SIZE = 16 * 1024
@@ -198,7 +208,7 @@ class File:
         file_type = None
         if HAVE_MAGIC:
             try:
-                ms = magic.open(magic.MAGIC_NONE)
+                ms = magic.open(magic.MAGIC_SYMLINK)
                 ms.load()
                 file_type = ms.file(self.file_path)
             except:
@@ -214,7 +224,7 @@ class File:
 
         if file_type is None:
             try:
-                p = subprocess.Popen(["file", "-b", self.file_path],
+                p = subprocess.Popen(["file", "-b", "-L", self.file_path],
                                      stdout=subprocess.PIPE)
                 file_type = p.stdout.read().strip()
             except:
@@ -229,7 +239,7 @@ class File:
         file_type = None
         if HAVE_MAGIC:
             try:
-                ms = magic.open(magic.MAGIC_MIME)
+                ms = magic.open(magic.MAGIC_MIME|magic.MAGIC_SYMLINK)
                 ms.load()
                 file_type = ms.file(self.file_path)
             except:
@@ -245,7 +255,7 @@ class File:
 
         if file_type is None:
             try:
-                p = subprocess.Popen(["file", "-b", "--mime-type", self.file_path],
+                p = subprocess.Popen(["file", "-b", "-L", "--mime-type", self.file_path],
                                      stdout=subprocess.PIPE)
                 file_type = p.stdout.read().strip()
             except:
@@ -378,3 +388,139 @@ class File:
         infos["clamav"] = self.get_clamav()
 
         return infos
+
+class ProcDump(object):
+    def __init__(self, dump_file, pretty=False):
+        self._dumpfile = open(dump_file, "rb")
+        self.dumpfile = mmap.mmap(self._dumpfile.fileno(), 0, access=mmap.ACCESS_READ)
+        self.address_space = self.parse_dump()
+        self.protmap = protmap = {
+            PAGE_NOACCESS : "NOACCESS",
+            PAGE_READONLY : "R",
+            PAGE_READWRITE : "RW",
+            PAGE_WRITECOPY : "RWC",
+            PAGE_EXECUTE : "X",
+            PAGE_EXECUTE_READ : "RX",
+            PAGE_EXECUTE_READWRITE : "RWX",
+            PAGE_EXECUTE_WRITECOPY : "RWXC",
+        }
+
+    def __del__(self):
+        self.close()
+
+    def close(self):
+        if self.dumpfile:
+            self.dumpfile.close()
+            self.dumpfile = None
+        if self._dumpfile:
+            self._dumpfile.close()
+            self._dumpfile = None
+
+    def _prot_to_str(self, prot):
+        if prot & PAGE_GUARD:
+            return "G"
+        prot &= 0xff
+        return self.protmap[prot]
+
+    def pretty_print(self):
+        new_addr_space = copy.deepcopy(self.address_space)
+        for map in new_addr_space:
+            map["start"] = "0x%.08x" % map["start"]
+            map["end"] = "0x%.08x" % map["end"]
+            map["size"] = "0x%.08x" % map["size"]
+            if map["prot"] is None:
+                map["prot"] = "Mixed"
+            else:
+                map["prot"] = self._prot_to_str(map["prot"])
+            for chunk in map["chunks"]:
+                chunk["start"] = "0x%.08x" % chunk["start"]
+                chunk["end"] = "0x%.08x" % chunk["end"]
+                chunk["size"] = "0x%.08x" % chunk["size"]
+                chunk["prot"] = self._prot_to_str(chunk["prot"])
+        return new_addr_space
+
+    def _coalesce_chunks(self, chunklist):
+        low = chunklist[0]["start"]
+        high = chunklist[-1]["end"]
+        prot = chunklist[0]["prot"]
+        PE = chunklist[0]["PE"]
+        for chunk in chunklist:
+            if chunk["prot"] != prot:
+                prot = None
+        return { "start" : low, "end" : high, "size" : high - low, "prot" : prot, "PE" : PE, "chunks" : chunklist }
+ 
+    def parse_dump(self):
+        f = self.dumpfile
+        address_space = []
+        curchunk = []
+        lastend = 0
+        while True:
+            data = f.read(24)
+            if data == '':
+                break
+            alloc = dict()
+            addr,size,mem_state,mem_type,mem_prot = struct.unpack("QIIII", data)
+            offset = f.tell()
+            if addr != lastend and len(curchunk):
+                address_space.append(self._coalesce_chunks(curchunk))
+                curchunk = []
+            lastend = addr + size
+            alloc["start"] = addr
+            alloc["end"] = (addr + size)
+            alloc["size"] = size
+            alloc["prot"] = mem_prot
+            alloc["state"] = mem_state
+            alloc["type"] = mem_type
+            alloc["offset"] = offset
+            alloc["PE"] = False
+            try:
+                if f.read(2) == "MZ":
+                    alloc["PE"] = True
+                f.seek(size-2, 1)
+            except:
+                break
+            curchunk.append(alloc)
+        if len(curchunk):
+            address_space.append(self._coalesce_chunks(curchunk))
+
+        f.seek(0)
+
+        return address_space
+
+    def get_data(self, addr, size):
+        for map in self.address_space:
+            if addr < map["start"] or addr >= map["end"]:
+                continue
+            for chunk in map["chunks"]:
+                if addr < chunk["start"] or addr >= chunk["end"]:
+                    continue
+                maxsize = chunk["start"] + chunk["size"] - addr
+                if size > maxsize:
+                    size = maxsize
+                self.dumpfile.seek(chunk["offset"] + addr - chunk["start"])
+                return self.dumpfile.read(size)
+
+    def search(self, regex, flags=0, all=False):
+        if all:
+            result = dict()
+            result["detail"] = []
+            matches = []
+            for map in self.address_space:
+                for chunk in map["chunks"]:
+                    self.dumpfile.seek(chunk["offset"])
+                    match = re.findall(regex, self.dumpfile.read(chunk["end"] - chunk["start"]), flags)
+                    if match:
+                        matches.extend(match)
+                        result["detail"].append({"match": match, "chunk": chunk})
+            result["matches"] = matches
+            return result
+        else:
+            for map in self.address_space:
+                for chunk in map["chunks"]:
+                    self.dumpfile.seek(chunk["offset"])
+                    match = re.search(regex, self.dumpfile.read(chunk["end"] - chunk["start"]), flags)
+                    if match:
+                        result = dict()
+                        result["match"] = match
+                        result["chunk"] = chunk
+                        return result

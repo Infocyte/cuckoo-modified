@@ -319,8 +319,10 @@ class PipeHandler(Thread):
                 elif command.startswith("SERVICE:"):
                     servname = command[8:]
                     si = subprocess.STARTUPINFO()
-                    si.dwFlags = subprocess.STARTF_USESHOWWINDOW
-                    si.wShowWindow = subprocess.SW_HIDE
+                    # STARTF_USESHOWWINDOW
+                    si.dwFlags = 1
+                    # SW_HIDE
+                    si.wShowWindow = 0
                     subprocess.call("sc config " + servname + " type= own", startupinfo=si)
                     log.info("Announced starting service \"%s\"", servname)
 
@@ -330,6 +332,7 @@ class PipeHandler(Thread):
                         # unable to inject
                         if SERVICES_PID:
                             servproc = Process(pid=SERVICES_PID,suspended=False)
+                            servproc.set_critical()
                             filepath = servproc.get_filepath()
                             servproc.inject(dll=DEFAULT_DLL, interest=filepath, nosleepskip=True)
                             LASTINJECT_TIME = datetime.now()
@@ -348,6 +351,7 @@ class PipeHandler(Thread):
                 # Handle attempted shutdowns/restarts -- flush logs for all monitored processes
                 # additional handling can be added later
                 elif command.startswith("SHUTDOWN:"):
+                    log.info("Received shutdown request")
                     PROCESS_LOCK.acquire()
                     for process_id in PROCESS_LIST:
                         event_name = TERMINATE_EVENT + str(process_id)
@@ -355,6 +359,10 @@ class PipeHandler(Thread):
                         if event_handle:
                             KERNEL32.SetEvent(event_handle)
                             KERNEL32.CloseHandle(event_handle)
+                            if self.options.get("procmemdump"):
+                                p = Process(pid=process_id)
+                                p.dump_memory()
+                            dump_files()
                     PROCESS_LOCK.release()
                 # Handle case of malware terminating a process -- notify the target
                 # ahead of time so that it can flush its log buffer
@@ -447,10 +455,9 @@ class PipeHandler(Thread):
                                 is_64bit = proc.is_64bit()
                                 filename = os.path.basename(filepath)
 
-                                log.info("Announced %s process name: %s pid: %d", "64-bit" if is_64bit else "32-bit", filename, process_id)
-
-                                if not in_protected_path(filename):
-                                    res = proc.inject(dll, interest)
+                                if not in_protected_path(filename) and proc.check_inject():
+                                    log.info("Announced %s process name: %s pid: %d", "64-bit" if is_64bit else "32-bit", filename, process_id)
+                                    proc.inject(dll, interest)
                                     LASTINJECT_TIME = datetime.now()
                                 proc.close()
                         else:
