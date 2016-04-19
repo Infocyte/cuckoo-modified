@@ -213,3 +213,36 @@ class SYSTEM_PROCESS_INFORMATION(Structure):
 		("BasePriority", ULONG),
 		("UniqueProcessId", PVOID),
 	]
+
+class SECURITY_DESCRIPTOR(Structure):
+    _pack_ = 1
+    _fields_ = [
+        ('Revision', BYTE),
+        ('Sbz1', BYTE),
+        ('Control', USHORT),
+        ('Owner', PVOID),
+        ('Group', PVOID),
+        ('Sacl', PVOID),
+        ('Dacl', PVOID),
+    ]
+ 
+class SECURITY_ATTRIBUTES(Structure):
+    _pack_ = 1
+    _fields_ = [
+        ('nLength', DWORD),
+        ('lpSecurityDescriptor', PVOID),
+        ('bInheritHandle', BYTE),
+    ]
+
+class SYSTEMTIME(Structure):
+    _pack_ = 1
+    _fields_ = [
+        ('wYear', WORD),
+        ('wMonth', WORD),
+        ('wDayOfWeek', WORD),
+        ('wDay', WORD),
+        ('wHour', WORD),
+        ('wMinute', WORD),
+        ('wSecond', WORD),
+        ('wMilliseconds', WORD),
+    ]
