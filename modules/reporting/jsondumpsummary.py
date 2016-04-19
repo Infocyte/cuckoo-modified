@@ -21,12 +21,17 @@ class JsonDumpSummary(Report):
         indent = self.options.get("indent", 4)
         encoding = self.options.get("encoding", "utf-8")
         ram_boost = self.options.get("ram_boost", True)
-	remove = self.options.get("remove", "")
-	
-	to_remove = remove.split(',')
-	simple = results.copy()
-	for tr in to_remove:
-		del simple[tr]
+        remove = self.options.get("remove", "")
+        bremove = self.options.get("bremove","")
+
+        to_remove = remove.split(',')
+        behavioral_remove = bremove.split(',')
+        simple = results.copy()
+        for tr in to_remove:
+            del simple[tr]
+        if behavioral_remove:
+            for br in behavioral_remove:
+                del simple["behavior"][br]
 
         try:
             path = os.path.join(self.reports_path, "summary-report.json")
