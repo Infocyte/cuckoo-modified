@@ -398,7 +398,7 @@ def gen_moloch_from_suri_http(suricata):
             if e.has_key("hostname") and e["hostname"]:
                 e["moloch_http_host_url"] = settings.MOLOCH_BASE + "?date=-1&expression=host.http" + quote("\x3d\x3d\x22%s\x22" % (e["hostname"]),safe='')
             if e.has_key("uri") and e["uri"]:
-                e["moloch_http_uri_url"] = settings.MOLOCH_BASE + "?date=-1&expression=http.uri" + quote("\x3d\x3d\x22%s\x22" % (e["uri"]),safe='')
+                e["moloch_http_uri_url"] = settings.MOLOCH_BASE + "?date=-1&expression=http.uri" + quote("\x3d\x3d\x22%s\x22" % (e["uri"].encode("utf8")),safe='')
             if e.has_key("ua") and e["ua"]:
                 e["moloch_http_ua_url"] = settings.MOLOCH_BASE + "?date=-1&expression=http.user-agent" + quote("\x3d\x3d\x22%s\x22" % (e["ua"]),safe='')
             if e.has_key("method") and e["method"]:
@@ -799,11 +799,17 @@ def file(request, category, task_id, dlfile):
     elif category == "dropped":
         buf = os.path.join(CUCKOO_ROOT, "storage", "analyses",
                            task_id, "files", file_name)
-        # Grab smaller file name as we store guest paths in the
-        # [orig file name]_info.exe
-        dfile = min(os.listdir(buf), key=len)
-        path = os.path.join(buf, dfile)
-        file_name = dfile + ".bin"
+        if os.path.isdir(buf):
+            # Backward compat for when each dropped file was in a separate dir
+            # Grab smaller file name as we store guest paths in the
+            # [orig file name]_info.exe
+            dfile = min(os.listdir(buf), key=len)
+            path = os.path.join(buf, dfile)
+            file_name = dfile + ".bin"
+        else:
+            path = buf
+            file_name += ".bin"
+
     # Just for suricata dropped files currently
     elif category == "zip":
         file_name = "files.zip"
