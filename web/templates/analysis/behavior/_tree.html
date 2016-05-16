@@ -1,6 +1,20 @@
+{% load generic_tags %}
+{% load analysis_tags %}
+
 <h4>Process Tree</h4>
 <ul>
-{% for process in analysis.behavior.processtree %}
-    {% include "analysis/behavior/_tree_process.html" %}
+{% for process in analysis.behavior.processtree|proctreetolist %}
+    {% if process.startchildren %}
+    <ul>
+    {% elif process.endchildren %}
+    </ul>
+    {% else %}
+    <li>
+    <strong><a href="javascript:show_tab('process_{{process.pid}}');">{{process.name}}</a></strong> {{process.pid}}
+    {% if process.environ.CommandLine %}
+      <i>{{ process.environ.CommandLine|format_cli:128 }}</i>
+    {% endif %}
+    </li>
+    {% endif %}
 {% endfor %}
 </ul>

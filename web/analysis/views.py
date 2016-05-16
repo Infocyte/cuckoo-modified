@@ -80,7 +80,7 @@ def get_analysis_info(db, id=-1, task=None):
                    {"info.id": int(new["id"])},
                    {
                        "info": 1, "virustotal_summary": 1,
-                       "info.custom":1, "info.shrike_msg":1, "malscore": 1, "malfamily": 1, 
+                       "info.custom":1, "info.shrike_msg":1, "malscore": 1, "malfamily": 1,
                        "network.pcap_sha256": 1,
                        "mlist_cnt": 1, "f_mlist_cnt": 1, "info.package": 1, "target.file.clamav": 1,
                        "suri_tls_cnt": 1, "suri_alert_cnt": 1, "suri_http_cnt": 1, "suri_file_cnt": 1
@@ -134,7 +134,7 @@ def get_analysis_info(db, id=-1, task=None):
         if rtmp.has_key("info") and rtmp["info"].has_key("package") and rtmp["info"]["package"]:
             new["package"] = rtmp["info"]["package"]
         if rtmp.has_key("target") and rtmp["target"].has_key("file") and rtmp["target"]["file"].has_key("clamav"):
-            new["clamav"] = rtmp["target"]["file"]["clamav"] 
+            new["clamav"] = rtmp["target"]["file"]["clamav"]
 
         if "display_shrike" in enabledconf and enabledconf["display_shrike"] and rtmp.has_key("info") and rtmp["info"].has_key("shrike_msg") and rtmp["info"]["shrike_msg"]:
             new["shrike_msg"] = rtmp["info"]["shrike_msg"]
@@ -468,7 +468,7 @@ def gen_moloch_from_antivirus(virustotal):
         for key in virustotal["scans"]:
             if virustotal["scans"][key]["result"]:
                  virustotal["scans"][key]["moloch"] = settings.MOLOCH_BASE + "?date=-1&expression=" + quote("tags\x3d\x3d\x22VT:%s:%s\x22" % (key,virustotal["scans"][key]["result"]),safe='')
-    return virustotal 
+    return virustotal
 
 @require_safe
 def surialert(request,task_id):
@@ -788,6 +788,11 @@ def file(request, category, task_id, dlfile):
         path = os.path.join(CUCKOO_ROOT, "storage", "analyses",
                             task_id, "shots", file_name)
         cd = "image/jpeg"
+    elif category == "usage":
+        path = os.path.join(CUCKOO_ROOT, "storage", "analyses",
+                            task_id, "aux", "usage.svg")
+        file_name = "usage.svg"
+        cd = "image/svg+xml"
     elif category in extmap:
         file_name += extmap[category]
         path = os.path.join(CUCKOO_ROOT, "storage", "analyses",
@@ -917,6 +922,7 @@ def filereport(request, task_id, category):
         "pdf": "report.pdf",
         "maec": "report.maec-4.1.xml",
         "metadata": "report.metadata.xml",
+        "misp": "misp.json"
     }
 
     if category in formats:
@@ -957,6 +963,7 @@ def full_memory_dump_file(request, analysis_number):
 @require_safe
 def full_memory_dump_strings(request, analysis_number):
     file_path = os.path.join(CUCKOO_ROOT, "storage", "analyses", str(analysis_number), "memory.dmp.strings")
+    filename = None
     if os.path.exists(file_path):
         filename = os.path.basename(file_path)
     else:
@@ -1048,7 +1055,7 @@ def perform_malscore_search(value):
     query_val =  {"$gte" : float(value)}
     if enabledconf["mongodb"]:
         return results_db.analysis.find({"malscore" : query_val}).sort([["_id", -1]])
-        
+
 def search(request):
     if "search" in request.POST:
         error = None
@@ -1186,7 +1193,7 @@ def pcapstream(request, task_id, conntuple):
 
     if enabledconf["mongodb"]:
         conndata = results_db.analysis.find_one({ "info.id": int(task_id) },
-            { "network.tcp": 1, "network.udp": 1},
+            { "network.tcp": 1, "network.udp": 1, "network.sorted_pcap_sha256": 1},
             sort=[("_id", pymongo.DESCENDING)])
 
     if enabledconf["elasticsearchdb"]:

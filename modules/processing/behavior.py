@@ -6,6 +6,7 @@ import os
 import logging
 import datetime
 import struct
+import itertools
 
 from lib.cuckoo.common.abstracts import Processing
 from lib.cuckoo.common.config import Config
@@ -374,7 +375,7 @@ class Processes:
                 log.warning("Behavioral log {0} too big to be processed, skipped.".format(file_name))
                 continue
 
-            # Invoke parsing of current log file.
+            # Invoke parsing of current log file (if ram_boost is enabled, otherwise parsing is done on-demand)
             current_log = ParseProcessLog(file_path)
             if current_log.process_id is None:
                 continue
@@ -389,7 +390,7 @@ class Processes:
                 "first_seen": logtime(current_log.first_seen),
                 "calls": current_log.calls,
                 "threads" : current_log.threads,
-                "environ" : current_log.environdict
+                "environ" : current_log.environdict,
             })
 
         # Sort the items in the results list chronologically. In this way we
@@ -527,7 +528,7 @@ class Summary:
             if servicename and servicename not in self.created_services:
                 self.created_services.append(servicename)
 
-        elif call["api"] == "CreateProcessInternalW" or call["api"] == "NtCreateUserProcess":
+        elif call["api"] in ["CreateProcessInternalW", "NtCreateUserProcess", "CreateProcessWithTokenW", "CreateProcessWithLogonW"]:
             cmdline = self.get_argument(call, "CommandLine", strip=True)
             appname = self.get_argument(call, "ApplicationName", strip=True)
             if appname and cmdline:
@@ -799,6 +800,8 @@ class Enhanced(object):
                 "object": "file",
                 "apis": [
                     "CreateProcessInternalW",
+                    "CreateProcessWithLogonW",
+                    "CreateProcessWithTokenW",
                 ],
                 "args": [("file", "CommandLine")]
             },
@@ -1068,7 +1071,8 @@ class ProcessTree:
             parent_id=process["parent_id"],
             module_path=process["module_path"],
             children=[],
-            threads=process["threads"]
+            threads=process["threads"],
+            environ=process["environ"],
         ))
 
     def run(self):
@@ -1134,9 +1138,5 @@ class BehaviorAnalysis(Processing):
                 behavior[instance.key] = instance.run()
             except:
                 log.exception("Failed to run partial behavior class \"%s\"", instance.key)
-
-            # Reset the ParseProcessLog instances after each module
-            for process in behavior["processes"]:
-                process["calls"].reset()
 
         return behavior

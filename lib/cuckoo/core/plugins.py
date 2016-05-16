@@ -481,11 +481,6 @@ class RunSignatures(object):
                     if match:
                         matched.append(match)
 
-                    # Reset the ParseProcessLog instances after each signature
-                    if "behavior" in self.results:
-                        for process in self.results["behavior"]["processes"]:
-                            process["calls"].reset()
-
         # Sort the matched signatures by their severity level.
         matched.sort(key=lambda key: key["severity"])
 
@@ -508,16 +503,7 @@ class RunSignatures(object):
             if "families" in match and match["families"]:
                 family = match["families"][0].title()
                 break
-        if not family and self.results["info"]["category"] == "file" and "virustotal" in self.results and "results" in self.results["virustotal"] and self.results["virustotal"]["results"]:
-            detectnames = []
-            for res in self.results["virustotal"]["results"]:
-                if res["sig"] and "Trojan.Heur." not in res["sig"]:
-                    # weight Microsoft's detection, they seem to be more accurate than the rest
-                    if res["vendor"] == "Microsoft":
-                        detectnames.append(res["sig"])
-                    detectnames.append(res["sig"])
-            family = get_vt_consensus(detectnames)
-        
+
         # add detection based on suricata here
         if not family and "suricata" in self.results and "alerts" in self.results["suricata"] and self.results["suricata"]["alerts"]:
             for alert in self.results["suricata"]["alerts"]:
@@ -531,7 +517,6 @@ class RunSignatures(object):
                             famchecklower = famcheck.lower()
 
                         blacklist = [
-                            "upx",
                             "executable",
                             "potential",
                             "likely",
@@ -551,18 +536,29 @@ class RunSignatures(object):
                             "win32",
                             "unknown",
                             "single",
-                            "exe",
                             "filename",
-                            "js",
+                            "worm",
                         ]
                         isgood = True
                         for black in blacklist:
                             if black == famchecklower:
                                 isgood = False
                                 break
+                        if len(famcheck) < 4:
+                            isgood = False
                         if isgood:
                             family = famcheck.title()
 
+        if not family and self.results["info"]["category"] == "file" and "virustotal" in self.results and "results" in self.results["virustotal"] and self.results["virustotal"]["results"]:
+            detectnames = []
+            for res in self.results["virustotal"]["results"]:
+                if res["sig"] and "Trojan.Heur." not in res["sig"]:
+                    # weight Microsoft's detection, they seem to be more accurate than the rest
+                    if res["vendor"] == "Microsoft":
+                        detectnames.append(res["sig"])
+                    detectnames.append(res["sig"])
+            family = get_vt_consensus(detectnames)
+        
         # fall back to ClamAV detection
         if not family and self.results["info"]["category"] == "file" and "clamav" in self.results["target"]["file"] and self.results["target"]["file"]["clamav"] and self.results["target"]["file"]["clamav"].startswith("Win.Trojan."):
             words = re.findall(r"[A-Za-z0-9]+", self.results["target"]["file"]["clamav"])

@@ -30,7 +30,7 @@ except ImportError:
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = "f111620bb8"
+SCHEMA_VERSION = "3c8bf4133b44"
 TASK_PENDING = "pending"
 TASK_RUNNING = "running"
 TASK_COMPLETED = "completed"
@@ -179,8 +179,7 @@ class Sample(Base):
     sha256 = Column(String(64), nullable=False)
     sha512 = Column(String(128), nullable=False)
     ssdeep = Column(String(255), nullable=True)
-    __table_args__ = Index("hash_index", "md5", "crc32", "sha1",
-                           "sha256", "sha512", unique=True),
+    __table_args__ = Index("md5_index", "md5"), Index("sha1_index", "sha1"), Index("sha256_index", "sha256", unique=True),
 
     def __repr__(self):
         return "<Sample('{0}','{1}')>".format(self.id, self.sha256)
@@ -308,6 +307,8 @@ class Task(Base):
     shrike_sid = Column(Integer(), nullable=True)
 
     parent_id = Column(Integer(), nullable=True)
+
+    __table_args__ = Index("category_index", "category"), Index("status_index", "status"), Index("added_on_index", "added_on"), Index("completed_on_index", "completed_on"),
 
     def to_dict(self):
         """Converts object to dict.
@@ -928,17 +929,17 @@ class Database(object):
                     task.clock = datetime.strptime(clock, "%m-%d-%Y %H:%M:%S")
                 except ValueError:
                     log.warning("The date you specified has an invalid format, using current timestamp.")
-                    task.clock = datetime.now()
+                    task.clock = datetime.utcnow()
             else:
                 task.clock = clock
         elif isinstance(obj, File):
             try:
-                clocktime = datetime.now() + timedelta(days=self.cfg.cuckoo.daydelta)
+                clocktime = datetime.utcnow() + timedelta(days=self.cfg.cuckoo.daydelta)
                 task.clock = clocktime
             except:
                 pass
         else:
-            task.clock = datetime.now()
+            task.clock = datetime.utcnow()
 
         session.add(task)
 

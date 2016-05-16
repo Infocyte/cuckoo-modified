@@ -300,9 +300,23 @@ def pretty_print_arg(category, api_name, arg_name, arg_val):
             "CLSCTX_PS_DLL"                  : 0x80000000
         }
         return simple_pretty_print_convert(val, enumdict)
+    elif arg_name == "BlobType":
+        val = int(arg_val, 10)
+        return {
+                0x0001 : "SIMPLEBLOB",
+                0x0006 : "PUBLICKEYBLOB",
+                0x0007 : "PRIVATEKEYBLOB",
+                0x0008 : "PLAINTEXTKEYBLOB",
+                0x0009 : "OPAQUEKEYBLOB",
+                0x000a : "PUBLICKEYBLOBEX",
+                0x000b : "SYMMETRICWRAPKEYBLOB",
+                0x000c : "KEYSTATEBLOB",
+        }.get(val, None)
     elif arg_name == "Algid":
         val = int(arg_val, 16)
         return {
+                0x0001 : "AT_KEYEXCHANGE",
+                0x0002 : "AT_SIGNATURE",
                 0x8001 : "MD2",
                 0x8002 : "MD4",
                 0x8003 : "MD5",
@@ -758,7 +772,7 @@ def pretty_print_arg(category, api_name, arg_name, arg_val):
         if val:
             res.append("0x{0:08x}".format(val))
         return "|".join(res)
-    elif api_name == "CreateProcessInternalW" and arg_name == "CreationFlags":
+    elif api_name in ["CreateProcessInternalW", "CreateProcessWithTokenW", "CreateProcessWithLogonW"] and arg_name == "CreationFlags":
         val = int(arg_val, 16)
         res = []
         if val & 0x00000001:
@@ -1258,6 +1272,39 @@ def pretty_print_arg(category, api_name, arg_name, arg_val):
                 104 : "INTERNET_OPTION_SUPPRESS_SERVER_AUTH",
                 105 : "INTERNET_OPTION_SERVER_CERT_CHAIN_CONTEXT"
         }.get(val, None)
+    elif api_name in ["socket", "WSASocketA", "WSASocketW"]:
+        if arg_name == "af":
+            val = int(arg_val, 10)
+            return {
+                    0 : "AF_UNSPEC",
+                    2 : "AF_INET",
+                    6 : "AF_IPX",
+                    16 : "AF_APPLETALK",
+                    17 : "AF_NETBIOS",
+                    23 : "AF_INET6",
+                    26 : "AF_IRDA",
+                    32 : "AF_BTH",
+            }.get(val, None)
+        elif arg_name == "type":
+            val = int(arg_val, 10)
+            return {
+                    1 : "SOCK_STREAM",
+                    2 : "SOCK_DGRAM",
+                    3 : "SOCK_RAW",
+                    4 : "SOCK_RDM",
+                    5 : "SOCK_SEQPACKET",
+            }.get(val, None)
+        elif arg_name == "protocol":
+            val = int(arg_val, 10)
+            return {
+                    1 : "IPPROTO_ICMP",
+                    2 : "IPPROTO_IGMP",
+                    3 : "BTHPROTO_RFCOMM",
+                    6 : "IPPROTO_TCP",
+                    17 : "IPPROTO_UDP",
+                    58 : "IPPROTO_ICMPV6",
+                    113 : "IPPROTO_RM",
+            }.get(val, None)
     elif arg_name == "FileInformationClass":
         val = int(arg_val, 10)
         return {
@@ -1509,6 +1556,7 @@ def get_vt_consensus(namelist):
         "dangerousobject",
         "symmi",
         "zusy",
+        "dynamer",
     ]
 
     finaltoks = defaultdict(int)
